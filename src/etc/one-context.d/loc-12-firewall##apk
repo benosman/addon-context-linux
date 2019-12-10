@@ -73,8 +73,16 @@ get_context_interfaces() {
     echo "$interfaces"
 }
 
-get_gateway_interfaces() {
-    env | grep -E "^ETH[0-9]+_VROUTER_GATEWAY=YES" | sed 's/_.*$//' | tr 'ETH' 'eth' | sort
+# Gets the network gateway interface
+get_gateway_interface() {
+    iface_num=$(echo "$GATEWAY_IFACE" | sed 's/^ETH//i')
+    if [ -z "$iface_num" ]; then
+        interfaces=$(get_context_interfaces)
+        set -- $interfaces
+        echo "$1"
+    else
+       echo "eth${iface_num}"
+    fi
 }
 
 gen_header() {
@@ -113,17 +121,18 @@ EOT
 }
 
 gen_nat_rules() {
-    for interface in $(get_gateway_interfaces); do
-        for destination in $(get_context_interfaces | grep -v $interface); do
+    gateway_interface=$(get_gateway_interface)
+    if [ -n "$gateway_interface" ]; then
+        for destination in $(get_context_interfaces | grep -v $gateway_interface); do
             UPCASE_DEV=$(echo "$destination" | tr 'eth' 'ETH')
             IP=$(get_ip)
             network=$(get_network)
             prefix=$(get_prefix)
             cat <<EOT
--A POSTROUTING -s ${network}${prefix} -o ${interface} -j MASQUERADE
+-A POSTROUTING -s ${network}${prefix} -o ${gateway_interface} -j MASQUERADE
 EOT
         done
-    done
+       fi
 }
 
 gen_close_web_interface() {
