@@ -67,6 +67,18 @@ get_mtu() {
     echo $mtu
 }
 
+# Gets the network gateway interface number
+get_gateway_interface_num() {
+    iface_num=$(echo "$GATEWAY_IFACE" | sed 's/^ETH//i')
+    if [ -z "$iface_num" ]; then
+        interfaces=$(get_non_management_interfaces)
+        set -- $interfaces
+        echo "$1" | sed 's/^ETH//i'
+    else
+       echo "$iface_num"
+    fi
+}
+
 is_gateway() {
     if [ -z "$GATEWAY_IFACE_NUM" ]; then
         true
@@ -204,6 +216,19 @@ get_context_interfaces()
     env | grep -E "^ETH[0-9]+_MAC=" | sed 's/_.*$//' | sort
 }
 
+get_management_interfaces() {
+    env | grep -E "^ETH[0-9]+_VROUTER_MANAGEMENT=YES" | sed 's/_.*$//' | sort
+}
+
+get_non_management_interfaces() {
+    interfaces="$(get_context_interfaces)"
+    management="$(get_management_interfaces)"
+    if [ -n "$management" ]; then
+        interfaces="$(echo "$interfaces" | grep -v "$management")"
+    fi
+    echo "$interfaces"
+}
+
 get_interface_alias()
 {
     env | grep -E "^ETH${INDEX}_ALIAS[0-9]+_MAC=" | cut -d '_' -f 2 | sort
@@ -227,7 +252,7 @@ EOT
 
     INTERFACE_MAC=$(get_interface_mac)
     CONTEXT_INTERFACES=$(get_context_interfaces)
-    GATEWAY_IFACE_NUM=$(echo "$GATEWAY_IFACE" | sed 's/^ETH//')
+    GATEWAY_IFACE_NUM=$(get_gateway_interface_num)
 
     for interface in $CONTEXT_INTERFACES; do
         UPCASE_DEV=$interface
