@@ -16,6 +16,50 @@
 # limitations under the License.                                             #
 #--------------------------------------------------------------------------- #
 
+## Network functions from loc-10-network
+
+# Gets the network part of an IP
+get_network() {
+    network=$(get_iface_var "NETWORK")
+
+    if [ -z "$network" ]; then
+        IFS=. read -r i1 i2 i3 i4 <<< "$(get_ip)"
+        IFS=. read -r m1 m2 m3 m4 <<< "$(get_mask)"
+        network=$(printf "%d.%d.%d.%d\n" "$((i1 & m1))" "$((i2 & m2))" "$((i3 & m3))" "$((i4 & m4))")
+    fi
+
+    echo $network
+}
+
+# Gets the network mask
+get_mask() {
+    mask=$(get_iface_var "MASK")
+
+    if [ -z "$mask" ]; then
+        mask="255.255.255.0"
+    fi
+
+    echo $mask
+}
+
+# Gets the network prefix
+get_prefix() {
+    ipcalc -p 1.1.1.1 "$(get_mask)" | sed -n 's/^PREFIX=\(.*\)/\/\1/p'
+}
+
+get_ip() {
+    ip=$(get_iface_var "IP")
+
+    echo $ip
+}
+
+get_iface_var() {
+    var_name="${UPCASE_DEV}_$1"
+    var=$(eval "echo \"\${$var_name}\"")
+
+    echo $var
+}
+
 get_management_interfaces() {
     env | grep -E "^ETH[0-9]+_VROUTER_MANAGEMENT=YES" | sed 's/_.*$//' | tr 'ETH' 'eth' | sort
 }
@@ -29,12 +73,26 @@ get_context_interfaces() {
     echo "$interfaces"
 }
 
+get_gateway_interfaces() {
+    env | grep -E "^ETH[0-9]+_VROUTER_GATEWAY=YES" | sed 's/_.*$//' | tr 'ETH' 'eth' | sort
+}
+
 gen_header() {
     cat <<EOT
 *filter
 :INPUT ACCEPT [0:0]
 :FORWARD DROP [0:0]
 :OUTPUT ACCEPT [0:0]
+EOT
+}
+
+gen_nat_header() {
+    cat <<EOT
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
 EOT
 }
 
@@ -49,6 +107,20 @@ gen_forwarding() {
         for destination in $(get_context_interfaces | grep -v $interface); do
             cat << EOT
 -A FORWARD -i $interface -o $destination -j ACCEPT
+EOT
+        done
+    done
+}
+
+gen_nat_rules() {
+    for interface in $(get_gateway_interfaces); do
+        for destination in $(get_context_interfaces | grep -v $interface); do
+            UPCASE_DEV=$(echo "$destination" | tr 'eth' 'ETH')
+            IP=$(get_ip)
+            network=$(get_network)
+            prefix=$(get_prefix)
+            cat <<EOT
+-A POSTROUTING -s ${network}${prefix} -o ${interface} -j MASQUERADE
 EOT
         done
     done
@@ -77,6 +149,9 @@ fi
 gen_header
 gen_forwarding
 gen_close_web_interface
+gen_footer
+gen_nat_header
+gen_nat_rules
 gen_footer
 
 ) > /etc/iptables/rules-save
